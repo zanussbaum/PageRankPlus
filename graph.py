@@ -269,7 +269,6 @@ class Graph:
 
         return clusters
 
-
     def fiedler_clustering(self, num_clusters):
         """Runs Fiedler clustering on the network
         
