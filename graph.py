@@ -1,5 +1,7 @@
 import json
+import heapq
 import numpy as np
+import math
 
 TOTAL_TELEPORTATION_RATE = .15
 TOTAL_FOLLOW_LINK_RATE = .85
@@ -17,6 +19,8 @@ class Node:
         """
         self.data = data
         self.hash = hash(str(self.data))
+        self.ranking = 0
+        self.cluster = -1
 
     def __hash__(self):
         """Overwritten hash method
@@ -57,7 +61,7 @@ class Node:
         returns:
             boolean: if this node is less than value node
         """
-        return self.data < value.data
+        return self.ranking > value.ranking
 
     def __le__(self, value):
         """Operator Overloading of less than equal
@@ -68,7 +72,7 @@ class Node:
         returns:
             boolean: if this node is less than or equal to value node
         """
-        return self.data <= value.data
+        return self.ranking >= value.ranking
 
     def __ge__(self, value):
         """Operator Overloading of greater than or equal
@@ -79,7 +83,7 @@ class Node:
         returns:
             boolean: if this node is greater than or equal to value node
         """
-        return self.data >= value.data
+        return self.ranking <= value.ranking
 
     def __gt__(self, value):
         """Operator Overloading of greater than
@@ -90,7 +94,7 @@ class Node:
         returns:
             boolean: if this node is greater than value node
         """
-        return self.data > value.data
+        return self.ranking < value.ranking
 
 
 class Graph:
@@ -164,7 +168,6 @@ class Graph:
 
     def _create_pr_matrix(self):
         """Generate the page rank matrix"""
-        self.size = len(self.edges.keys())
 
         self.matrix = np.zeros((self.size, self.size))
 
@@ -199,8 +202,10 @@ class Graph:
 
     def _set_mapping(self):
         """Creates a list of nodes in sorted order for easier retrieval later"""
-        for node in sorted(self.edges.keys()):
-            self.mapping.append(node)
+        num_keys = len(self.edges.keys())
+        self.mapping = [None] * num_keys
+        for node in self.edges.keys():
+            self.mapping[node.data - 1] = node
 
     def page_rank(self):
         """Runs the page rank algorithm
@@ -212,8 +217,6 @@ class Graph:
         print("Generated the matrix: ")
         self._print_matrix()
 
-        self._set_mapping()
-
         starting_vector = np.zeros((self.size, 1))
         starting_vector[0] = 1 
 
@@ -221,7 +224,14 @@ class Graph:
 
         ranking_list = np.array(self.mapping)[np.argsort(-ranking.T)]
 
-        return ranking, ranking_list
+        #iterate over ranking, add to node
+        node_list = []
+        for i in range(ranking.shape[0]):
+            node = self.mapping[i]
+            node.ranking = ranking[i]
+            heapq.heappush(node_list, node)
+
+        return node_list, ranking, ranking_list
 
     def _create_adjacency_matrix(self):
         """Creates the adjacency matrix for fiedler clustering"""
@@ -241,13 +251,34 @@ class Graph:
             sum = np.sum(self.adjacency[i])
             self.diagonal[i, i] = sum
 
-    def fiedler_clustering(self):
+    def _cluster(self, fiedler_vector_list):
+        clusters = {}
+
+        for i in range(len(self.edges.keys())):
+            node = self.mapping[i]
+            binary = ['1' if fiedler_vector_list[x, i] > 0 else '0' for x in range(len(fiedler_vector_list))]
+            cluster = int(''.join(binary), 2)
+            node.cluster = cluster
+            if cluster not in clusters:
+                clusters.update({cluster: [node]})
+
+            else:
+                heap_list = clusters.get(cluster)
+                heapq.heappush(heap_list, node)
+                clusters.update({cluster: heap_list})
+
+        return clusters
+
+
+    def fiedler_clustering(self, num_clusters):
         """Runs Fiedler clustering on the network
         
         returns:
-            cluster1: sorted list of the first cluster
-            cluster2: sorted list of the second cluster
+            cluster: dict mapping of cluster to nodes in the cluster
         """
+        self._set_mapping()
+        self.size = len(self.edges.keys())
+
         self._create_adjacency_matrix()
         self._create_diagonal_matrix()
 
@@ -262,30 +293,19 @@ class Graph:
         print()
 
         self.sorted_eigenvalues = np.argsort(self.eigenvalues)
-
         print("second smallest eigenvalue is {}\n".format(
             self.sorted_eigenvalues[1]))
 
-        fiedler_vector = self.eigenvectors[self.sorted_eigenvalues[1]]
+        fiedler_vector_list = []
+        for i in range(int(math.log2(num_clusters))):
+            fiedler_vector = self.eigenvectors[:, self.sorted_eigenvalues[i + 1]]
+            print("fiedler:\n")
+            print(fiedler_vector)
+            fiedler_vector_list.append(fiedler_vector)
 
-        print("fiedler:\n")
-        print(fiedler_vector)
-        print()
+        clusters = self._cluster(np.array(fiedler_vector_list))
 
-        fiedler_vector_arg = np.argsort(
-            -self.eigenvectors[self.sorted_eigenvalues[1]])
-
-        cluster_one = []
-        cluster_two = []
-
-        # want to maintain order of sorting
-        for arg in fiedler_vector_arg:
-            if fiedler_vector[arg] < 0:
-                cluster_one.append(self.mapping[arg])
-            else:
-                cluster_two.append(self.mapping[arg])
-
-        return cluster_one, cluster_two
+        return clusters
 
 
 if __name__ == '__main__':
@@ -301,9 +321,10 @@ if __name__ == '__main__':
 
     print("The graph is \n{}".format(graph))
 
-    page_rank, ranking_list = graph.page_rank()
+    clusters = graph.fiedler_clustering(4)
 
-    cluster_one, cluster_two = graph.fiedler_clustering()
+    node_list, page_rank, ranking_list = graph.page_rank()
+
     print("diagonal matrix")
     print(graph.diagonal)
     print("adjacency matrix")
@@ -313,11 +334,14 @@ if __name__ == '__main__':
     print("\nPage rank ranking:\n{}".format(ranking_list))
     print(page_rank)
     print("\nFielder Clustering returned")
-    print(cluster_one)
-    print(cluster_two)
-    print()
+    print(clusters)
 
-    #testing fielder clustering
+    while node_list:
+        node = heapq.heappop(node_list)
+        print("node: {} ranking: {} cluster: {}".format(node, node.ranking, node.cluster))
+    
+
+    # #testing fielder clustering
     graph = Graph()
 
     graph.add_edge(1, 4)
@@ -341,9 +365,10 @@ if __name__ == '__main__':
 
     print("The graph is \n{}".format(graph))
 
-    page_rank, ranking_list = graph.page_rank()
+    clusters = graph.fiedler_clustering(4)
 
-    cluster_one, cluster_two = graph.fiedler_clustering()
+    node_list, page_rank, ranking_list = graph.page_rank()
+
     print("diagonal matrix")
     print(graph.diagonal)
     print("adjacency matrix")
@@ -352,5 +377,11 @@ if __name__ == '__main__':
     print(graph.laplacian)
     print("\nPage rank ranking:\n{}".format(ranking_list))
     print("\nFielder Clustering returned")
-    print(cluster_one)
-    print(cluster_two)
+    print(clusters)
+
+    while node_list:
+        node = heapq.heappop(node_list)
+        print("node: {} ranking: {} cluster: {}".format(node, node.ranking, node.cluster))
+    
+
+
