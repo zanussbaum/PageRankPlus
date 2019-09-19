@@ -2,12 +2,13 @@ import json
 import heapq
 import numpy as np
 import math
+import sys
 import scipy.sparse as sps
 from scipy.sparse.linalg import eigs
 
 
-TOTAL_TELEPORTATION_RATE = .15
-TOTAL_FOLLOW_LINK_RATE = .85
+FOLLOW = .85
+TRANSPORTATION = 1 - FOLLOW
 
 
 class Node:
@@ -112,17 +113,16 @@ class Graph:
         edges: a map denoting edges from the key to values
         mapping: sorted order of nodes
     """
-    def __init__(self):
+    def __init__(self, num_nodes):
         """Initializes an empty web network"""
         self.edges = {}
         self.mapping = []
+        self.graph = sps.lil_matrix((num_nodes, num_nodes))
+        self.size = num_nodes
 
     def __str__(self):
         """Overwritten string representation method"""
-        str = ""
-        for k in self.edges.keys():
-            str += "({}, {})\n".format(k, self.edges.get(k))
-        return str
+        return np.array2string(self.graph.toarray())
 
     def __repr__(self):
         """Overwritten string representation method"""
@@ -151,70 +151,30 @@ class Graph:
         raises:
             ValueError: if the edge has already been created
         """
-        node = Node(to_link)
-        from_node = Node(from_website)
-
-        if from_node not in self.edges:
-            self._add_node(from_website)
-
-        if node not in self.edges:
-            self._add_node(to_link)
-
-        edges = self.edges.get(from_node)
-        if node not in edges:
-            edges.append(node)
-        else:
-            raise ValueError("Edge already created from {} to {}".format(
-                from_website, to_link))
-
-        self.edges.update({from_node: edges})
+        self.graph[to_link - 1, from_website - 1] = 1
 
     def _create_pr_matrix(self):
         """
         Generate the page rank matrix
         """
+        graph = self.graph.toarray()
 
-        self.matrix = sps.lil_matrix((self.size, self.size))
+        length = self.size
 
-        for key in self.edges.keys():
-            edges = self.edges.get(key)
+        self.matrix = (TRANSPORTATION/length)*np.ones((length, length))
 
-            column = key.data - 1
-
-            if len(edges) == 0:
-                self.matrix[:, column] = 1/self.size
-
+        for i in range(length):
+            col_sum = np.sum(graph[:, i])
+            if col_sum != 0:
+                self.matrix[:, i] = FOLLOW * (1/col_sum * graph[:, i]) + (TRANSPORTATION/length)*np.ones((length))
             else:
-                teleportation_rate = TOTAL_TELEPORTATION_RATE/self.size
-                link_rate = TOTAL_FOLLOW_LINK_RATE/len(edges)
-                
-                for i, node in enumerate(self.edges.keys()):
-                    if node in edges:
-                        self.matrix[node.data - 1, column] = teleportation_rate + link_rate
-                    else:
-                        self.matrix[node.data - 1, column] = teleportation_rate
+                self.matrix[:, i] = (1/length)*np.ones((length))
 
     def _print_matrix(self):
         """
         Prints the Page Rank matrix
         """
-        matrix_str = ""
-        for node in self.edges.keys():
-            matrix_str += str(node) + "\t"
-        matrix_str += "\n"
-
-        matrix_str += str(self.matrix)
-
-        print(matrix_str)
-
-    def _set_mapping(self):
-        """
-        Creates a list of nodes in sorted order for easier retrieval later
-        """
-        num_keys = len(self.edges.keys())
-        self.mapping = [None] * num_keys
-        for node in self.edges.keys():
-            self.mapping[node.data - 1] = node
+        print(self.matrix)
 
     def page_rank(self):
         """Runs the page rank algorithm
@@ -222,39 +182,22 @@ class Graph:
         returns:
             a vector corresponding to the steady state vecto
         """
+        print("Generating the matrix...")
         self._create_pr_matrix()
-        print("Generated the matrix...")
-        # self._print_matrix()
 
         starting_vector = np.zeros((self.size, 1))
         starting_vector[0] = 1 
 
-        ranking = (self.matrix ** 100).dot(starting_vector)
+        px = starting_vector
+        matrix = self.matrix
+        for i in range(100):
+            px = matrix.dot(px)
 
-        ranking_list = np.array(self.mapping)[np.argsort(-ranking.T)]
+        self.ranking = (matrix).dot(px)
 
-        #iterate over ranking, add to node
-        node_list = []
-        for i in range(ranking.shape[0]):
-            node = self.mapping[i]
-            node.ranking = ranking[i]
-            heapq.heappush(node_list, node)
+        ranking_list = self.ranking[np.argsort(-self.ranking.T)]
 
-        return node_list, ranking, ranking_list
-
-    def _create_adjacency_matrix(self):
-        """
-        Creates the adjacency matrix for fiedler clustering
-        """
-        print("Creating the adjacency matrix...")
-        self.adjacency = sps.lil_matrix((self.size, self.size))
-
-        for key, edges in self.edges.items():
-            row = key.data - 1
-
-            for edge in edges:
-                column = edge.data - 1
-                self.adjacency[row, column] = 1
+        return self.ranking, ranking_list
 
     def _create_diagonal_matrix(self):
         """
@@ -262,19 +205,33 @@ class Graph:
         """
         print("Creating diagonal matrix...")
         self.diagonal = sps.lil_matrix((self.size, self.size))
-        for i in range(self.size):
-            sum = np.sum(self.adjacency[i])
-            self.diagonal[i, i] = sum
+
+        adjacency = self.graph
+        size = self.size
+
+        for i in range(size):
+            row_sum = np.sum(adjacency[i, :])
+            self.diagonal[i, i] = row_sum 
 
     def _cluster(self, fiedler_vector_list):
         print("Clustering...")
         clusters = {}
 
-        for i in range(len(self.edges.keys())):
-            node = self.mapping[i]
+        size = self.size
+        matrix = self.matrix
+        ranking = self.ranking
+
+        node_list = []
+
+        for i in range(size):
+            node = Node(i+1)
+            node.ranking = ranking[i]
+
             binary = ['1' if fiedler_vector_list[x, i] > 0 else '0' for x in range(len(fiedler_vector_list))]
             cluster = int(''.join(binary), 2)
             node.cluster = cluster
+
+            heapq.heappush(node_list, node)
             if cluster not in clusters:
                 clusters.update({cluster: [node]})
 
@@ -283,28 +240,25 @@ class Graph:
                 heapq.heappush(heap_list, node)
                 clusters.update({cluster: heap_list})
 
-        return clusters
+        return clusters, node_list
 
     def fiedler_clustering(self, num_clusters):
         """Runs Fiedler clustering on the network
         
         returns:
             cluster: dict mapping of cluster to nodes in the cluster
+            node_list: max_heap of nodes based on ranking
         """
-        self._set_mapping()
-        self.size = len(self.edges.keys())
-
-        self._create_adjacency_matrix()
         self._create_diagonal_matrix()
 
-        self.laplacian = self.diagonal - self.adjacency
+        self.laplacian = self.diagonal - self.graph
         print("finding eigenvalues...")
         self.eigenvalues, self.eigenvectors = eigs(
             self.laplacian, k=num_clusters, which='SM')
 
-        print("\neigenvalues:")
+        print("\neigenvalues found:")
         print(self.eigenvalues)
-        print("\neigenvectors:")
+        print("\neigenvectors found:")
         print(self.eigenvectors)
         print()
 
@@ -318,14 +272,12 @@ class Graph:
             print(fiedler_vector)
             fiedler_vector_list.append(fiedler_vector)
 
-        clusters = self._cluster(np.array(fiedler_vector_list))
-
-        return clusters
+        return self._cluster(np.array(fiedler_vector_list))
 
 
 if __name__ == '__main__':
     #family guy graph
-    graph = Graph()
+    graph = Graph(4)
 
     graph.add_edge(1, 2)
     graph.add_edge(2, 1)
@@ -336,18 +288,17 @@ if __name__ == '__main__':
 
     print("The graph is \n{}".format(graph))
 
-    clusters = graph.fiedler_clustering(2)
+    page_rank, ranking_list = graph.page_rank()
 
-    node_list, page_rank, ranking_list = graph.page_rank()
+    clusters, node_list = graph.fiedler_clustering(2)
 
     print("diagonal matrix")
-    print(graph.diagonal.todense())
+    print(graph.diagonal.toarray())
     print("adjacency matrix")
-    print(graph.adjacency.todense())
+    print(graph.graph.toarray())
     print("laplacian matrix")
-    print(graph.laplacian.todense())
+    print(graph.laplacian.toarray())
     print("\nPage rank ranking:\n{}".format(ranking_list))
-    print(page_rank)
     print("\nFielder Clustering returned")
     print(clusters)
 
@@ -356,8 +307,8 @@ if __name__ == '__main__':
         print("node: {} ranking: {} cluster: {}".format(node, node.ranking, node.cluster))
     
 
-    # #testing fielder clustering
-    graph = Graph()
+    # # #testing fielder clustering
+    graph = Graph(7)
 
     graph.add_edge(1, 4)
     graph.add_edge(1, 6)
@@ -380,16 +331,17 @@ if __name__ == '__main__':
 
     print("The graph is \n{}".format(graph))
 
-    clusters = graph.fiedler_clustering(2)
+    page_rank, ranking_list = graph.page_rank()
 
-    node_list, page_rank, ranking_list = graph.page_rank()
+    clusters, node_list = graph.fiedler_clustering(2)
+
 
     print("diagonal matrix")
-    print(graph.diagonal.todense())
+    print(graph.diagonal.toarray())
     print("adjacency matrix")
-    print(graph.adjacency.todense())
+    print(graph.graph.toarray())
     print("laplacian matrix")
-    print(graph.laplacian.todense())
+    print(graph.laplacian.toarray())
     print("\nPage rank ranking:\n{}".format(ranking_list))
     print("\nFielder Clustering returned")
     print(clusters)
