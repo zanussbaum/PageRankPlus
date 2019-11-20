@@ -183,21 +183,25 @@ class Graph:
             a vector corresponding to the steady state vecto
         """
         print("Generating the matrix...")
-        self._create_pr_matrix()
+        G = self.graph
+        p = FOLLOW
+        column_sum = np.sum(G, axis=0, dtype=np.float64)
+    
+        n = self.graph.shape[0]
 
-        starting_vector = np.zeros((self.size, 1))
-        starting_vector[0] = 1 
+        D = sps.lil_matrix((n, n))
+        D.setdiag(np.divide(1.,column_sum, where=column_sum != 0, out=np.zeros_like(column_sum)).reshape(-1, 1))
+        e = np.ones((n, 1))
+        I = sps.eye(n)
+        x = sps.linalg.spsolve((I - p*G*D), e)
+        x = x/np.sum(x)
+    
 
-        px = starting_vector
-        matrix = self.matrix
-        for i in range(100):
-            px = matrix.dot(px)
+        ranking_list = x[np.argsort(-x.T)]
 
-        self.ranking = (matrix).dot(px)
+        self.ranking = x
 
-        ranking_list = self.ranking[np.argsort(-self.ranking.T)]
-
-        return self.ranking, ranking_list
+        return x, ranking_list
 
     def _create_diagonal_matrix(self):
         """
@@ -218,7 +222,6 @@ class Graph:
         clusters = {}
 
         size = self.size
-        matrix = self.matrix
         ranking = self.ranking
 
         node_list = []
@@ -277,34 +280,34 @@ class Graph:
 
 if __name__ == '__main__':
     #family guy graph
-    graph = Graph(4)
+    # graph = Graph(4)
 
-    graph.add_edge(1, 2)
-    graph.add_edge(2, 1)
-    graph.add_edge(2, 3)
-    graph.add_edge(3, 4)
-    graph.add_edge(3, 2)
-    graph.add_edge(3, 1)
+    # graph.add_edge(1, 2)
+    # graph.add_edge(2, 1)
+    # graph.add_edge(2, 3)
+    # graph.add_edge(3, 4)
+    # graph.add_edge(3, 2)
+    # graph.add_edge(3, 1)
 
-    print("The graph is \n{}".format(graph))
+    # print("The graph is \n{}".format(graph))
 
-    page_rank, ranking_list = graph.page_rank()
+    # page_rank, ranking_list = graph.page_rank()
 
-    clusters, node_list = graph.fiedler_clustering(2)
+    # clusters, node_list = graph.fiedler_clustering(2)
 
-    print("diagonal matrix")
-    print(graph.diagonal.toarray())
-    print("adjacency matrix")
-    print(graph.graph.toarray())
-    print("laplacian matrix")
-    print(graph.laplacian.toarray())
-    print("\nPage rank ranking:\n{}".format(ranking_list))
-    print("\nFielder Clustering returned")
-    print(clusters)
+    # print("diagonal matrix")
+    # print(graph.diagonal.toarray())
+    # print("adjacency matrix")
+    # print(graph.graph.toarray())
+    # print("laplacian matrix")
+    # print(graph.laplacian.toarray())
+    # print("\nPage rank ranking:\n{}".format(ranking_list))
+    # print("\nFielder Clustering returned")
+    # print(clusters)
 
-    while node_list:
-        node = heapq.heappop(node_list)
-        print("node: {} ranking: {} cluster: {}".format(node, node.ranking, node.cluster))
+    # while node_list:
+    #     node = heapq.heappop(node_list)
+    #     print("node: {} ranking: {} cluster: {}".format(node, node.ranking, node.cluster))
     
 
     # # #testing fielder clustering
