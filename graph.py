@@ -5,7 +5,7 @@ import math
 import sys
 import scipy.sparse as sps
 from scipy.sparse.linalg import eigs
-from sklearn.cluster import spectral_clustering
+from sklearn.cluster import MiniBatchKMeans
 
 
 FOLLOW = .85
@@ -74,6 +74,7 @@ class Graph:
         D = sps.lil_matrix((n, n))
         D.setdiag(np.divide(1.,column_sum, where=column_sum != 0, out=np.zeros_like(column_sum)).reshape(-1, 1))
         self.diagonal = D
+        print("created diagonal")
         e = np.ones((n, 1))
         I = sps.eye(n)
         x = sps.linalg.spsolve((I - p*G*D), e)
@@ -91,7 +92,7 @@ class Graph:
             node_list: max_heap of nodes based on ranking
         """
 
-        clusters = spectral_clustering(n_clusters=num_clusters, affinity=self.graph)
+        clusters = MiniBatchKMeans(n_clusters=num_clusters).fit_predict(self.graph)
 
         return clusters
 

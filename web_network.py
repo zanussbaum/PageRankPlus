@@ -1,14 +1,26 @@
 import pickle
 import argparse
 import math
-import heapq
-from graph import Graph, Node
+import numpy as np 
+from graph import Graph
 
 
 def save_graph(filename):
-    graph = Graph()
-
     count = 0
+    nodes = set()
+    with open(filename, 'r') as file:
+        for line in file:
+            if not line.startswith("#"):
+                split = line.replace(" ", "").split()
+                from_node = int(split[0])
+                to_node = int(split[1])
+                nodes.add(from_node)
+                nodes.add(to_node)
+
+    graph = Graph(len(nodes))
+    print("there are {} nodes".format(len(nodes)))
+    nodes.clear()
+
     with open(filename, 'r') as file:
         for line in file:
             if not line.startswith("#"):
@@ -67,19 +79,24 @@ if __name__ == '__main__':
     else:
         graph = load_graph(filename)
 
-    num_nodes = len(graph.edges.keys())
+    num_nodes = graph.size
     
     
-    # num_clusters = math.pow(2, math.ceil(math.log2(num_nodes//2)))
-    # print("there are {} clusters".format(num_clusters))
+    num_clusters = math.pow(2, math.ceil(math.log2(num_nodes//2)))
+    print("there are {} clusters".format(num_clusters))
 
-    clusters = graph.fiedler_clustering(2)
 
-    node_list, page_rank, ranking_list = graph.page_rank()
+    page_rank = graph.page_rank()
+    print('finished page rank')
+    clusters = graph.fiedler_clustering(3)
+    print("finished clustering")
 
-    for i in range(100):
-        node = heapq.heappop(node_list)
-        print("node: {} ranking: {} cluster: {}".format(
-            node, node.ranking, node.cluster))
+    rank_cluster_file = open('results.txt', 'w')
+
+    for node in np.argsort(-page_rank.T):
+        result = "node: {} ranking: {} cluster: {}".format(node + 1, page_rank[node], clusters[node])
+        rank_cluster_file.write(result + " \n")
+
+    rank_cluster_file.close()
 
     
